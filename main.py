@@ -1,5 +1,6 @@
 import pandas as pd
 import arcpy
+import numpy
 
 glacial_units_path = 'glacial_units.txt'
 geo_data_path = 'gis_data/hennepin/final_grids.gdb'
@@ -14,7 +15,7 @@ arcpy.env.workspace = geo_data_path
 with open(glacial_units_path, 'r') as f:
     glacial_units = f.readline().split(', ')
 
-gu_df = pd.DataFrame(columns=['c5st_seq_no', 'relateid', 'glacial_unit', 'percentage', 'depth_top', 'depth_bot'])
+gu_df = pd.DataFrame(columns=['c5st_objectid', 'relateid', 'glacial_unit', 'percentage', 'depth_top', 'depth_bot'])
 
 cwi_wells = pd.read_csv(cwi_well_data_path, low_memory=False)
 strat_layers = pd.read_csv(cwi_strat_data_path, low_memory=False, on_bad_lines='skip')
@@ -22,9 +23,13 @@ strat_layers = pd.read_csv(cwi_strat_data_path, low_memory=False, on_bad_lines='
 cwi_wells = cwi_wells[cwi_wells['county_c'] == 27]
 strat_layers = strat_layers[strat_layers['relateid'].isin(cwi_wells['relateid'])]
 
+def raster_to_array():
+    pass
+
 def layer_to_glacial_codes(well, layer):
     point_str = str(well['utme']) + ' ' + str(well['utmn'])
 
+    # TODO: These management.GetCellValue calls need to be replaced with some form of Cython script
     for g_unit in glacial_units:
         result = arcpy.management.GetCellValue(g_unit + '_top', point_str)
 
@@ -49,7 +54,7 @@ def layer_to_glacial_codes(well, layer):
         percentage = intersect_thick/st_thick
 
         data = {
-            'c5st_seq_no': layer['c5st_seq_no'],
+            'c5st_objectid': layer['objectid'],
             'relateid': well['relateid'],
             'glacial_unit': g_unit,
             'percentage': percentage,
@@ -57,24 +62,29 @@ def layer_to_glacial_codes(well, layer):
             'depth_bot': depth_bot
         }
 
-        print(data)
         gu_df.loc[len(gu_df)] = data
 
-temp_iter = 0
+old_gu_df = pd.read_csv(save_data_path)
+
+# Used to save the file every X layers to prevent data loss on timeout
+save_iterator = 0
 
 for _, well in cwi_wells.iterrows():
 
     layers = strat_layers[strat_layers['relateid'] == well['relateid']]
 
     for _, layer in layers.iterrows():
+        # Skips over existing entries in database
+        if layer['objectid'] in old_gu_df['c5st_objectid'].values:
+            continue
+
         layer_to_glacial_codes(well, layer)
 
-        temp_iter += 1
+        save_iterator += 1
 
-        if temp_iter > 10:
-            break
+        if save_iterator > 25:
+            save_iterator = 0
+            gu_df.to_csv(save_data_path, mode='a', index=False, header=None)
+            gu_df = pd.DataFrame(columns=gu_df.columns)
 
-    if temp_iter > 10:
-        break
-
-gu_df.to_csv(save_data_path, index=False)
+gu_df.to_csv(save_data_path, mode='a', index=False, header=None)
