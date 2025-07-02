@@ -1,9 +1,11 @@
+import csv
+
 import pandas as pd
 import arcpy
 import numpy
 
 glacial_units_path = 'glacial_units.txt'
-geo_data_path = 'gis_data/hennepin/final_grids.gdb'
+geo_data_path = 'gis_data/hennepin.gdb'
 cwi_strat_data_path = 'cwi_data/c5st.csv'
 cwi_well_data_path = 'cwi_data/cwi5.csv'
 
@@ -15,76 +17,87 @@ arcpy.env.workspace = geo_data_path
 with open(glacial_units_path, 'r') as f:
     glacial_units = f.readline().split(', ')
 
-gu_df = pd.DataFrame(columns=['c5st_objectid', 'relateid', 'glacial_unit', 'percentage', 'depth_top', 'depth_bot'])
-
 cwi_wells = pd.read_csv(cwi_well_data_path, low_memory=False)
 strat_layers = pd.read_csv(cwi_strat_data_path, low_memory=False, on_bad_lines='skip')
 
 cwi_wells = cwi_wells[cwi_wells['county_c'] == 27]
+cwi_wells = cwi_wells.dropna(subset=['utme', 'utmn', 'elevation'])
 strat_layers = strat_layers[strat_layers['relateid'].isin(cwi_wells['relateid'])]
 
-def raster_to_array():
-    pass
+for g_unit in glacial_units:
 
-def layer_to_glacial_codes(well, layer):
-    point_str = str(well['utme']) + ' ' + str(well['utmn'])
+    top_raster = arcpy.Raster(f'{g_unit}_top')
+    top_array = arcpy.RasterToNumPyArray(top_raster, nodata_to_value=None)
 
-    # TODO: These management.GetCellValue calls need to be replaced with some form of Cython script
-    for g_unit in glacial_units:
-        result = arcpy.management.GetCellValue(g_unit + '_top', point_str)
+    top_x_origin = top_raster.extent.XMin
+    top_y_origin = top_raster.extent.YMax
+    top_cell_width = top_raster.meanCellWidth
+    top_cell_height = top_raster.meanCellHeight
 
-        if result.getOutput(0) == 'NoData':
-            continue
+    base_raster = arcpy.Raster(f'{g_unit}_base')
+    base_array = arcpy.RasterToNumPyArray(base_raster, nodata_to_value=None)
 
-        gu_top = float(result.getOutput(0))
-        gu_bot = float(arcpy.management.GetCellValue(g_unit + '_base', point_str).getOutput(0))
+    base_x_origin = base_raster.extent.XMin
+    base_y_origin = base_raster.extent.YMax
+    base_cell_width = base_raster.meanCellWidth
+    base_cell_height = base_raster.meanCellHeight
 
-        elev = float(well['elevation'])
-        st_top = elev - float(layer['depth_top'])
-        st_bot = elev - float(layer['depth_bot'])
-        st_thick = st_top - st_bot
+    gu_df = pd.DataFrame(columns=['c5st_objectid', 'relateid', 'glacial_unit', 'percentage', 'depth_top', 'depth_bot'])
 
-        depth_top = min(gu_top, st_top)
-        depth_bot = max(gu_bot, st_bot)
-        intersect_thick = depth_top - depth_bot
+    print(f'STARTING GLACIAL UNIT {g_unit}')
 
-        if intersect_thick <= 0:
-            continue
+    for _, well in cwi_wells.iterrows():
 
-        percentage = intersect_thick/st_thick
+        layers = strat_layers[strat_layers['relateid'] == well['relateid']]
+        layers = layers.dropna(subset=['depth_top', 'depth_bot'])
 
-        data = {
-            'c5st_objectid': layer['objectid'],
-            'relateid': well['relateid'],
-            'glacial_unit': g_unit,
-            'percentage': percentage,
-            'depth_top': depth_top,
-            'depth_bot': depth_bot
-        }
+        for _, layer in layers.iterrows():
+            x = int(well['utme'])
+            y = int(well['utmn'])
 
-        gu_df.loc[len(gu_df)] = data
+            top_x_shifted = int((x - top_x_origin)/top_cell_width)
+            top_y_shifted = int((top_y_origin - y)/top_cell_height)
 
-old_gu_df = pd.read_csv(save_data_path)
+            base_x_shifted = int((x - base_x_origin)/base_cell_width)
+            base_y_shifted = int((base_y_origin - y)/base_cell_height)
 
-# Used to save the file every X layers to prevent data loss on timeout
-save_iterator = 0
+            # TODO: Fix this if an error arises, but unlikely
+            '''if (top_x_shifted < 0 or top_y_shifted < 0 or base_x_shifted < 0 or base_y_shifted < 0 or
+                top_x_shifted > top_raster.width or top_y_shifted > top_raster.height or
+                base_x_shifted > base_raster.width or base_y_shifted > base_raster.height):
+                print("OUT OF RASTER BOUNDS")
+                continue '''
 
-for _, well in cwi_wells.iterrows():
+            gu_top = top_array[top_y_shifted, top_x_shifted]
+            gu_base = base_array[base_y_shifted, base_x_shifted]
 
-    layers = strat_layers[strat_layers['relateid'] == well['relateid']]
+            if gu_top is None or gu_base is None or gu_top == 0 or gu_base == 0:
+                continue
 
-    for _, layer in layers.iterrows():
-        # Skips over existing entries in database
-        if layer['objectid'] in old_gu_df['c5st_objectid'].values:
-            continue
+            elev = float(well['elevation'])
+            st_top = elev - float(layer['depth_top'])
+            st_bot = elev - float(layer['depth_bot'])
+            st_thick = st_top - st_bot
 
-        layer_to_glacial_codes(well, layer)
+            depth_top = min(gu_top, st_top)
+            depth_bot = max(gu_base, st_bot)
+            thickness = depth_top - depth_bot
 
-        save_iterator += 1
+            if thickness <= 0:
+                continue
 
-        if save_iterator > 25:
-            save_iterator = 0
-            gu_df.to_csv(save_data_path, mode='a', index=False, header=None)
-            gu_df = pd.DataFrame(columns=gu_df.columns)
+            percentage = thickness/st_thick
 
-gu_df.to_csv(save_data_path, mode='a', index=False, header=None)
+            data = {
+                'c5st_objectid': layer['objectid'],
+                'relateid': well['relateid'],
+                'glacial_unit': g_unit,
+                'percentage': percentage,
+                'depth_top': depth_top,
+                'depth_bot': depth_bot
+            }
+
+            gu_df.loc[len(gu_df)] = data
+
+    print(gu_df)
+    gu_df.to_csv(save_data_path, mode='a', index=False, header=None)
