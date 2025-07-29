@@ -1,0 +1,291 @@
+import csv
+import pandas as pd
+import arcpy
+import numpy
+import time
+from PyQt5.QtWidgets import QApplication, QHBoxLayout, QWidget, QListWidget, QListWidgetItem, QComboBox, QFormLayout, \
+    QLineEdit, QPushButton, QLabel, QFileDialog
+from PyQt5.QtCore import QThread, pyqtSignal
+
+import glacial_unit_finder
+
+WINDOW_TITLE = "CWI Glacial Unit Identifier"
+COUNTY_DICT = {
+    "Aitkin": 1,
+    "Anoka": 2,
+    "Becker": 3,
+    "Beltrami": 4,
+    "Benton": 5,
+    "Big Stone": 6,
+    "Blue Earth": 7,
+    "Brown": 8,
+    "Carlton": 9,
+    "Carver": 10,
+    "Cass": 11,
+    "Chippewa": 12,
+    "Chisago": 13,
+    "Clay": 14,
+    "Clearwater": 15,
+    "Cook": 16,
+    "Cottonwood": 17,
+    "Crow Wing": 18,
+    "Dakota": 19,
+    "Dodge": 20,
+    "Douglas": 21,
+    "Faribault": 22,
+    "Fillmore": 23,
+    "Freeborn": 24,
+    "Goodhue": 25,
+    "Grant": 26,
+    "Hennepin": 27,
+    "Houston": 28,
+    "Hubbard": 29,
+    "Isanti": 30,
+    "Itasca": 31,
+    "Jackson": 32,
+    "Kanabec": 33,
+    "Kandiyohi": 34,
+    "Kittson": 35,
+    "Koochichng": 36,
+    "Lac Qui Parle": 37,
+    "Lake": 38,
+    "Lake of The Woods": 39,
+    "Le Sueur": 40,
+    "Lincoln": 41,
+    "Lyon": 42,
+    "McLeod": 43,
+    "Mahnomen": 44,
+    "Marshall": 45,
+    "Martin": 46,
+    "Meeker": 47,
+    "Mille Lacs": 48,
+    "Morrison": 49,
+    "Mower": 50,
+    "Murray": 51,
+    "Nicollet": 52,
+    "Nobles": 53,
+    "Norman": 54,
+    "Olmsted": 55,
+    "Otter Tail": 56,
+    "Pennington": 57,
+    "Pine": 58,
+    "Pipestone": 59,
+    "Polk": 60,
+    "Pope": 61,
+    "Ramsey": 62,
+    "Red Lake": 63,
+    "Redwood": 64,
+    "Renville": 65,
+    "Rice": 66,
+    "Rock": 67,
+    "Roseau": 68,
+    "St. Louis": 69,
+    "Scott": 70,
+    "Sherburne": 71,
+    "Sibley": 72,
+    "Stearns": 73,
+    "Steele": 74,
+    "Stevens": 75,
+    "Swift": 76,
+    "Todd": 77,
+    "Traverse": 78,
+    "Wabasha": 79,
+    "Wadena": 80,
+    "Waseca": 81,
+    "Washington": 82,
+    "Watonwan": 83,
+    "Wilkin": 84,
+    "Winona": 85,
+    "Wright": 86,
+    "Yellow Medicine": 87,
+    "Iowa": 88,
+    "Wisconsin": 89,
+    "North Dakota": 90,
+    "South Dakota": 91,
+    "Canada": 92,
+    "Unknown": 99
+}
+SAVE_MODE_DICT = {'Append' : 'a', 'New' : 'w'}
+SAVE_TYPE_DICT = {'Majority Glacial Unit' : True, 'Every Glacial Unit' : False}
+
+class CWIThread(QThread):
+    progress = pyqtSignal((int, int, str))
+
+    raster_list : list
+    wells_df : pd.DataFrame
+    layers_df : pd.DataFrame
+
+    data_path : str
+    save_path : str
+
+    save_mode : str
+    save_type : bool
+
+    def __init__(self, raster_list, data_path, wells_df, layers_df, save_mode, save_type, save_path):
+        super().__init__()
+        self.raster_list = raster_list
+        self.data_path = data_path
+        self.wells_df = wells_df
+        self.layers_df = layers_df
+        self.save_mode = save_mode
+        self.save_type = save_type
+        self.save_path = save_path
+
+    def run(self):
+        gu_df = pd.DataFrame(columns=['c5st_objectid', 'relateid', 'glacial_unit', 'percentage',
+                                      'depth_top', 'depth_bot', 'elev_top', 'elev_bot'])
+
+        for raster in self.raster_list:
+            self.progress.emit((self.raster_list.index(raster) + 1, len(self.raster_list), raster))
+
+            raster_df = glacial_unit_finder.parse_raster(self.data_path, raster, self.wells_df, self.layers_df)
+
+            pd.concat([gu_df, raster_df], ignore_index=True)
+
+        if self.save_type:
+            gu_df = glacial_unit_finder.find_majority_unit(gu_df)
+
+        if self.save_mode == 'a':
+            gu_df.to_csv(self.save_path.text(),
+                         mode=self.save_mode,
+                         index=False,
+                         header=None)
+        else:
+            gu_df.to_csv(self.save_path.text(),
+                         mode=self.save_mode,
+                         index=False)
+
+
+class CWIGlacialUnits(QWidget):
+
+    gdb_path : QLineEdit
+    st_path : QLineEdit
+    cwi_path : QLineEdit
+    save_path : QLineEdit
+
+    progress_label : QLabel
+
+    county : QComboBox
+    save_mode = QComboBox
+    save_type = QComboBox
+
+    def __init__(self):
+        super().__init__()
+        self.create_ui()
+
+    def create_ui(self):
+        self.setWindowTitle(WINDOW_TITLE)
+        self.setGeometry(100, 100, 600, 200)
+
+        layout = QFormLayout()
+
+        gdb_layout = QHBoxLayout()
+
+        gdb_button = QPushButton('Browse')
+        gdb_button.clicked.connect(self.open_gdb_file_dialog)
+        self.gdb_path = QLineEdit()
+
+        gdb_layout.addWidget(self.gdb_path)
+        gdb_layout.addWidget(gdb_button)
+
+        layout.addRow('GDB Path:', gdb_layout)
+
+        cwi_layout = QHBoxLayout()
+
+        cwi_button = QPushButton('Browse')
+        cwi_button.clicked.connect(self.open_cwi_file_dialog)
+        self.cwi_path = QLineEdit()
+
+        cwi_layout.addWidget(self.cwi_path)
+        cwi_layout.addWidget(cwi_button)
+
+        layout.addRow('CWI5 Path:', cwi_layout)
+
+        st_layout = QHBoxLayout()
+
+        st_button = QPushButton('Browse')
+        st_button.clicked.connect(self.open_st_file_dialog)
+        self.st_path = QLineEdit()
+
+        st_layout.addWidget(self.st_path)
+        st_layout.addWidget(st_button)
+
+        layout.addRow('C5ST Path:', st_layout)
+
+        self.county = QComboBox()
+        self.county.addItems([county for county in COUNTY_DICT.keys()])
+        layout.addRow('County:', self.county)
+
+        self.setLayout(layout)
+
+        save_layout = QHBoxLayout()
+
+        save_button = QPushButton('Browse')
+        save_button.clicked.connect(self.open_save_file_dialog)
+        self.save_path = QLineEdit()
+
+        save_layout.addWidget(self.save_path)
+        save_layout.addWidget(save_button)
+
+        layout.addRow('Save Path:', save_layout)
+
+        self.save_mode = QComboBox()
+        self.save_mode.addItems([mode for mode in SAVE_MODE_DICT.keys()])
+        layout.addRow('Save Mode:', self.save_mode)
+
+        self.save_type = QComboBox()
+        self.save_type.addItems([type for type in SAVE_TYPE_DICT.keys()])
+        layout.addRow('Save Type:', self.save_type)
+
+        run_button = QPushButton('Run')
+        run_button.clicked.connect(self.run_app)
+        layout.addRow(run_button)
+
+        self.progress_label = QLabel('')
+        layout.addRow('Progress:', self.progress_label)
+
+        self.setLayout(layout)
+
+    def run_app(self):
+        raster_list = glacial_unit_finder.get_raster_list(self.gdb_path.text())
+
+        wells_df, layers_df = glacial_unit_finder.load_cwi_data(
+            self.cwi_path.text(),
+            self.st_path.text(),
+            COUNTY_DICT[self.county.currentText()]
+        )
+        thread = CWIThread(raster_list, self.gdb_path.text(),
+                                wells_df, layers_df,
+                                SAVE_MODE_DICT[self.save_mode.currentText()],
+                                SAVE_TYPE_DICT[self.save_type.currentText()],
+                                self.save_path.text())
+        thread.progress.connect(self.update_progress)
+        thread.start()
+
+    def update_progress(self, cur : int, total : int, raster : str):
+        print(f'{cur} OF {total} : GLACIAL UNIT {raster}')
+        self.progress_label.setText(f'{cur} OF {total} : GLACIAL UNIT {raster}')
+
+    def open_file_dialog(self, label : QLabel, name_filter : str = '',
+                         mode : QFileDialog.FileMode = QFileDialog.FileMode.ExistingFile):
+        dialog = QFileDialog()
+        dialog.setFileMode(mode)
+        dialog.setNameFilter(name_filter)
+
+        if dialog.exec():
+            filename = dialog.selectedFiles()
+
+            if filename:
+                label.setText(filename[0])
+
+    def open_save_file_dialog(self):
+        self.open_file_dialog(self.save_path, mode = QFileDialog.FileMode.AnyFile)
+
+    def open_cwi_file_dialog(self):
+        self.open_file_dialog(self.cwi_path, name_filter = 'CSV (*.csv)')
+
+    def open_st_file_dialog(self):
+        self.open_file_dialog(self.st_path, name_filter = 'CSV (*.csv)')
+
+    def open_gdb_file_dialog(self):
+        self.open_file_dialog(self.gdb_path, mode=QFileDialog.FileMode.Directory)
