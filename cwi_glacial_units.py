@@ -5,7 +5,7 @@ import numpy
 import time
 from PyQt5.QtWidgets import QApplication, QHBoxLayout, QWidget, QListWidget, QListWidgetItem, QComboBox, QFormLayout, \
     QLineEdit, QPushButton, QLabel, QFileDialog
-from PyQt5.QtCore import QThread, pyqtSignal
+from PyQt5.QtCore import QThread, pyqtSignal, QObject, pyqtSlot
 
 import glacial_unit_finder
 
@@ -108,55 +108,51 @@ COUNTY_DICT = {
 SAVE_MODE_DICT = {'Append' : 'a', 'New' : 'w'}
 SAVE_TYPE_DICT = {'Majority Glacial Unit' : True, 'Every Glacial Unit' : False}
 
-class CWIThread(QThread):
-    progress = pyqtSignal((int, int, str))
 
-    raster_list : list
-    wells_df : pd.DataFrame
-    layers_df : pd.DataFrame
+class CWIGlacialWorker(QObject):
+    progress = pyqtSignal(str)
 
-    data_path : str
-    save_path : str
+    @pyqtSlot(str, str, str, str, bool, str, int)
+    def run_worker(self, gdb_path : str, cwi_path : str, st_path : str, save_mode : str, save_type : bool, save_path : str, county : int):
+        self.progress.emit('Loading Rasters...')
 
-    save_mode : str
-    save_type : bool
+        raster_list = glacial_unit_finder.get_raster_list(gdb_path)
 
-    def __init__(self, raster_list, data_path, wells_df, layers_df, save_mode, save_type, save_path):
-        super().__init__()
-        self.raster_list = raster_list
-        self.data_path = data_path
-        self.wells_df = wells_df
-        self.layers_df = layers_df
-        self.save_mode = save_mode
-        self.save_type = save_type
-        self.save_path = save_path
+        self.progress.emit('Loading CWI Data...')
 
-    def run(self):
+        wells_df, layers_df = glacial_unit_finder.load_cwi_data(
+            cwi_path,
+            st_path,
+            county
+        )
+
         gu_df = pd.DataFrame(columns=['c5st_objectid', 'relateid', 'glacial_unit', 'percentage',
                                       'depth_top', 'depth_bot', 'elev_top', 'elev_bot'])
 
-        for raster in self.raster_list:
-            self.progress.emit((self.raster_list.index(raster) + 1, len(self.raster_list), raster))
+        for raster in raster_list:
+            self.progress.emit(f'{raster_list.index(raster) + 1} OF {len(raster_list)} : GLACIAL UNIT {raster}')
 
-            raster_df = glacial_unit_finder.parse_raster(self.data_path, raster, self.wells_df, self.layers_df)
+            raster_df = glacial_unit_finder.parse_raster(gdb_path, raster, wells_df, layers_df)
 
-            pd.concat([gu_df, raster_df], ignore_index=True)
+            gu_df = pd.concat([gu_df, raster_df], ignore_index=True)
 
-        if self.save_type:
+        if save_type:
             gu_df = glacial_unit_finder.find_majority_unit(gu_df)
 
-        if self.save_mode == 'a':
-            gu_df.to_csv(self.save_path.text(),
-                         mode=self.save_mode,
+        if save_mode == 'a':
+            gu_df.to_csv(save_path,
+                         mode=save_mode,
                          index=False,
                          header=None)
         else:
-            gu_df.to_csv(self.save_path.text(),
-                         mode=self.save_mode,
+            gu_df.to_csv(save_path,
+                         mode=save_mode,
                          index=False)
 
 
 class CWIGlacialUnits(QWidget):
+
+    run_signal = pyqtSignal(str, str, str, str, bool, str, int)
 
     gdb_path : QLineEdit
     st_path : QLineEdit
@@ -168,6 +164,9 @@ class CWIGlacialUnits(QWidget):
     county : QComboBox
     save_mode = QComboBox
     save_type = QComboBox
+
+    thread : QThread
+    worker : CWIGlacialWorker
 
     def __init__(self):
         super().__init__()
@@ -246,25 +245,30 @@ class CWIGlacialUnits(QWidget):
 
         self.setLayout(layout)
 
-    def run_app(self):
-        raster_list = glacial_unit_finder.get_raster_list(self.gdb_path.text())
+        self.thread = QThread()
+        self.worker = CWIGlacialWorker()
 
-        wells_df, layers_df = glacial_unit_finder.load_cwi_data(
+        self.worker.moveToThread(self.thread)
+
+        self.worker.progress.connect(self.update_progress)
+        self.run_signal.connect(self.worker.run_worker)
+
+        self.thread.start()
+
+
+    def run_app(self):
+        return
+        self.run_signal.emit(
+            self.gdb_path.text(),
             self.cwi_path.text(),
             self.st_path.text(),
+            SAVE_MODE_DICT[self.save_mode.currentText()],
+            SAVE_TYPE_DICT[self.save_type.currentText()],
             COUNTY_DICT[self.county.currentText()]
         )
-        thread = CWIThread(raster_list, self.gdb_path.text(),
-                                wells_df, layers_df,
-                                SAVE_MODE_DICT[self.save_mode.currentText()],
-                                SAVE_TYPE_DICT[self.save_type.currentText()],
-                                self.save_path.text())
-        thread.progress.connect(self.update_progress)
-        thread.start()
 
-    def update_progress(self, cur : int, total : int, raster : str):
-        print(f'{cur} OF {total} : GLACIAL UNIT {raster}')
-        self.progress_label.setText(f'{cur} OF {total} : GLACIAL UNIT {raster}')
+    def update_progress(self, msg : str):
+        self.progress_label.setText(msg)
 
     def open_file_dialog(self, label : QLabel, name_filter : str = '',
                          mode : QFileDialog.FileMode = QFileDialog.FileMode.ExistingFile):
