@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import QApplication, QHBoxLayout, QWidget, QListWidget, QLi
 import glacial_unit_finder
 from cwi_glacial_units import CWIGlacialUnits
 
+
 app = QApplication([])
 
 window = CWIGlacialUnits()

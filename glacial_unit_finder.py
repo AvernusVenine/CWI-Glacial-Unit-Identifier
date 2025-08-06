@@ -42,6 +42,8 @@ def load_cwi_data(cwi_path : str, st_path : str, county : int):
 # TODO: Need to add/fix elevation and depth!
 # Parses a raster for each layer found in a given dataframe, returning a dataframe containing all intersections and their percentage
 def parse_raster(data_path, raster : str, wells_df : pd.DataFrame, layers_df : pd.DataFrame):
+    pd.set_option('mode.chained_assignment', None)
+
     arcpy.env.workspace = data_path
 
     top_raster = arcpy.Raster(f'{raster}_top')

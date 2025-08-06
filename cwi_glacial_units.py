@@ -9,7 +9,7 @@ from PyQt5.QtCore import QThread, pyqtSignal, QObject, pyqtSlot
 
 import glacial_unit_finder
 
-WINDOW_TITLE = "CWI Glacial Unit Identifier"
+WINDOW_TITLE = "CWI Stratigraphy Unit Identifier"
 COUNTY_DICT = {
     "Aitkin": 1,
     "Anoka": 2,
@@ -105,54 +105,75 @@ COUNTY_DICT = {
     "Canada": 92,
     "Unknown": 99
 }
-SAVE_MODE_DICT = {'Append' : 'a', 'New' : 'w'}
-SAVE_TYPE_DICT = {'Majority Glacial Unit' : True, 'Every Glacial Unit' : False}
+SAVE_MODE_DICT = {'Append Existing File' : 'a', 'New File' : 'w'}
+SAVE_TYPE_DICT = {'Majority Unit' : True, 'Every Unit' : False}
 
 
 class CWIGlacialWorker(QObject):
     progress = pyqtSignal(str)
+    completion = pyqtSignal()
 
-    @pyqtSlot(str, str, str, str, bool, str, int)
-    def run_worker(self, gdb_path : str, cwi_path : str, st_path : str, save_mode : str, save_type : bool, save_path : str, county : int):
+    @pyqtSlot(str, str, str, str, str, bool, int)
+    def run(self, gdb_path : str, cwi_path : str, st_path : str, save_path : str, save_mode : str, save_type : bool, county : int):
         self.progress.emit('Loading Rasters...')
 
-        raster_list = glacial_unit_finder.get_raster_list(gdb_path)
+        try:
+            raster_list = glacial_unit_finder.get_raster_list(gdb_path)
+        except Exception as e:
+            self.progress.emit(f'Error Loading Rasters! {e}')
+            self.completion.emit()
+            return
 
         self.progress.emit('Loading CWI Data...')
 
-        wells_df, layers_df = glacial_unit_finder.load_cwi_data(
-            cwi_path,
-            st_path,
-            county
-        )
+        try:
+            wells_df, layers_df = glacial_unit_finder.load_cwi_data(
+                cwi_path,
+                st_path,
+                county
+            )
+        except Exception as e:
+            self.progress.emit(f'Error Loading CWI Data! {e}')
+            self.completion.emit()
+            return
 
-        gu_df = pd.DataFrame(columns=['c5st_objectid', 'relateid', 'glacial_unit', 'percentage',
-                                      'depth_top', 'depth_bot', 'elev_top', 'elev_bot'])
+        gu_df = pd.DataFrame()
 
         for raster in raster_list:
-            self.progress.emit(f'{raster_list.index(raster) + 1} OF {len(raster_list)} : GLACIAL UNIT {raster}')
+            self.progress.emit(f'{raster_list.index(raster) + 1} OF {len(raster_list)} : UNIT {raster}')
 
             raster_df = glacial_unit_finder.parse_raster(gdb_path, raster, wells_df, layers_df)
 
             gu_df = pd.concat([gu_df, raster_df], ignore_index=True)
 
+        self.progress.emit('Saving Data...')
+
         if save_type:
             gu_df = glacial_unit_finder.find_majority_unit(gu_df)
 
-        if save_mode == 'a':
-            gu_df.to_csv(save_path,
-                         mode=save_mode,
-                         index=False,
-                         header=None)
-        else:
-            gu_df.to_csv(save_path,
-                         mode=save_mode,
-                         index=False)
+        try:
+            if save_mode == 'a':
+                gu_df.to_csv(save_path,
+                             mode=save_mode,
+                             index=False,
+                             header=None)
+            else:
+                gu_df.to_csv(save_path,
+                             mode=save_mode,
+                             index=False)
+        except Exception as e:
+            self.progress.emit(f'Error Saving Data! {e}')
+            self.completion.emit()
+            return
 
+        self.progress.emit('Complete!')
+        self.completion.emit()
 
 class CWIGlacialUnits(QWidget):
 
-    run_signal = pyqtSignal(str, str, str, str, bool, str, int)
+    run_signal = pyqtSignal(str, str, str, str, str, bool, int)
+
+    run_button : QPushButton
 
     gdb_path : QLineEdit
     st_path : QLineEdit
@@ -236,9 +257,9 @@ class CWIGlacialUnits(QWidget):
         self.save_type.addItems([type for type in SAVE_TYPE_DICT.keys()])
         layout.addRow('Save Type:', self.save_type)
 
-        run_button = QPushButton('Run')
-        run_button.clicked.connect(self.run_app)
-        layout.addRow(run_button)
+        self.run_button = QPushButton('Run')
+        self.run_button.clicked.connect(self.run_app)
+        layout.addRow(self.run_button)
 
         self.progress_label = QLabel('')
         layout.addRow('Progress:', self.progress_label)
@@ -251,21 +272,27 @@ class CWIGlacialUnits(QWidget):
         self.worker.moveToThread(self.thread)
 
         self.worker.progress.connect(self.update_progress)
-        self.run_signal.connect(self.worker.run_worker)
+        self.worker.completion.connect(self.show_run_button)
+        self.run_signal.connect(self.worker.run)
 
         self.thread.start()
 
 
     def run_app(self):
-        return
+        self.run_button.hide()
+
         self.run_signal.emit(
             self.gdb_path.text(),
             self.cwi_path.text(),
             self.st_path.text(),
-            SAVE_MODE_DICT[self.save_mode.currentText()],
-            SAVE_TYPE_DICT[self.save_type.currentText()],
-            COUNTY_DICT[self.county.currentText()]
+            self.save_path.text(),
+            SAVE_MODE_DICT.get(self.save_mode.currentText()),
+            SAVE_TYPE_DICT.get(self.save_type.currentText()),
+            COUNTY_DICT.get(self.county.currentText())
         )
+
+    def show_run_button(self):
+        self.run_button.show()
 
     def update_progress(self, msg : str):
         self.progress_label.setText(msg)
