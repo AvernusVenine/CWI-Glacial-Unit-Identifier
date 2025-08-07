@@ -21,21 +21,16 @@ def get_raster_list(data_path : str):
 
     return raster_list
 
-# Loads CWI data from two given paths, well index and strat layers, from a given county
-def load_cwi_data(cwi_path : str, st_path : str, county : int):
-    cwi_wells = pd.read_csv(cwi_path, low_memory=False)
+# Loads CWI data from two given paths, well index and strat layers, from a given county and returns it in the form of two DataFrames
+def load_cwi_data(cwi_path : str, st_path : str, county : int) -> (pd.DataFrame, pd.DataFrame):
+    cwi_wells = pd.read_csv(cwi_path, low_memory=False, on_bad_lines='skip')
     strat_layers = pd.read_csv(st_path, low_memory=False, on_bad_lines='skip')
 
     cwi_wells = cwi_wells[cwi_wells['county_c'] == county]
     strat_layers = strat_layers[strat_layers['relateid'].isin(cwi_wells['relateid'])]
 
-    wells_df = cwi_wells[['relateid', 'elevation', 'utme', 'utmn', 'data_src', 'aquifer']]
-    wells_df.is_copy = False
-    layers_df = strat_layers[['relateid', 'depth_top', 'depth_bot', 'color', 'hardness', 'drllr_desc', 'strat',
-                              'lith_prim', 'lith_sec', 'lith_minor']]
-    layers_df['geo_code'] = None
-    layers_df['percentage'] = 0
-    layers_df.is_copy = False
+    wells_df = cwi_wells[['relateid', 'elevation', 'utme', 'utmn']]
+    layers_df = strat_layers[['relateid', 'depth_top', 'depth_bot', 'objectid']]
 
     return wells_df, layers_df
 
@@ -43,6 +38,9 @@ def load_cwi_data(cwi_path : str, st_path : str, county : int):
 # Parses a raster for each layer found in a given dataframe, returning a dataframe containing all intersections and their percentage
 def parse_raster(data_path, raster : str, wells_df : pd.DataFrame, layers_df : pd.DataFrame):
     pd.set_option('mode.chained_assignment', None)
+
+    df = pd.DataFrame(columns=['c5st_objectid', 'relateid', 'unit', 'percentage', 'depth_top', 'depth_bot', 'elevation',
+                               'elevation_top', 'elevation_bot'])
 
     arcpy.env.workspace = data_path
 
@@ -78,14 +76,15 @@ def parse_raster(data_path, raster : str, wells_df : pd.DataFrame, layers_df : p
             base_x_shifted = int((x - base_x_origin) / base_cell_width)
             base_y_shifted = int((base_y_origin - y) / base_cell_height)
 
+            # TODO: Should throw an exception
             if top_x_shifted < 0 or top_y_shifted < 0 or base_x_shifted < 0 or base_y_shifted < 0:
                 print("OUT OF RASTER BOUNDS")
                 continue
 
-            gu_top = top_array[top_y_shifted, top_x_shifted]
-            gu_base = base_array[base_y_shifted, base_x_shifted]
+            unit_top = top_array[top_y_shifted, top_x_shifted]
+            unit_base = base_array[base_y_shifted, base_x_shifted]
 
-            if gu_top is None or gu_base is None or gu_top == 0 or gu_base == 0:
+            if unit_top is None or unit_base is None or unit_top == 0 or unit_base == 0:
                 continue
 
             elev = float(well['elevation'])
@@ -93,28 +92,39 @@ def parse_raster(data_path, raster : str, wells_df : pd.DataFrame, layers_df : p
             st_bot = elev - float(layer['depth_bot'])
             st_thick = st_top - st_bot
 
-            depth_top = min(gu_top, st_top)
-            depth_bot = max(gu_base, st_bot)
-            thickness = depth_top - depth_bot
+            elev_top = min(unit_top, st_top)
+            elev_bot = max(unit_base, st_bot)
+            thickness = elev_top - elev_bot
 
             if thickness <= 0:
                 continue
 
             percentage = thickness / st_thick
 
-            if layers_df.loc[index, 'percentage'] < percentage:
-                layers_df.loc[index, 'percentage'] = percentage
-                layers_df.loc[index, 'geo_code'] = raster.upper()
+            df.loc[len(df)] = {
+                'c5st_objectid' : layer['objectid'],
+                'relateid' : layer['relateid'],
+                'unit' : raster,
+                'percentage' : percentage,
+                'depth_top' : elev - elev_top,
+                'depth_bot' : elev - elev_bot,
+                'elevation' : well['elevation'],
+                'elevation_top' : elev_top,
+                'elevation_bot' : elev_bot
+            }
+
+    return df
+
 
 def find_majority_unit(df : pd.DataFrame):
-    maj_df = pd.DataFrame()
+    maj_df = pd.DataFrame(columns=['c5st_objectid', 'relateid', 'unit', 'percentage', 'depth_top', 'depth_bot', 'elevation',
+                               'elevation_top', 'elevation_bot'])
 
     for layer_id in df['c5st_objectid'].unique():
         layers = df[df['c5st_objectid'] == layer_id]
 
         maj_layer = layers[layers['percentage'] == layers['percentage'].max()]
 
-        maj_df = pd.concat([maj_df, maj_layer[['relateid', 'glacial_unit', 'percentage','depth_top',
-                                                         'depth_bot', 'elev_top', 'elev_bot']]], ignore_index=True)
+        maj_df = pd.concat([maj_df, maj_layer], ignore_index=True)
 
     return maj_df

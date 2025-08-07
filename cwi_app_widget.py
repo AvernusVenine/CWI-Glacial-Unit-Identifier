@@ -1,13 +1,8 @@
-import csv
 import pandas as pd
-import arcpy
-import numpy
-import time
-from PyQt5.QtWidgets import QApplication, QHBoxLayout, QWidget, QListWidget, QListWidgetItem, QComboBox, QFormLayout, \
+from PyQt5.QtWidgets import QHBoxLayout, QWidget, QComboBox, QFormLayout, \
     QLineEdit, QPushButton, QLabel, QFileDialog
 from PyQt5.QtCore import QThread, pyqtSignal, QObject, pyqtSlot
-
-import glacial_unit_finder
+import strat_unit_identifier as StratIdentifier
 
 WINDOW_TITLE = "CWI Stratigraphy Unit Identifier"
 COUNTY_DICT = {
@@ -107,9 +102,10 @@ COUNTY_DICT = {
 }
 SAVE_MODE_DICT = {'Append Existing File' : 'a', 'New File' : 'w'}
 SAVE_TYPE_DICT = {'Majority Unit' : True, 'Every Unit' : False}
+#TODO: Possible expand this to allow for 'units with percentage larger than X' modes as well
 
-
-class CWIGlacialWorker(QObject):
+# CWI Worker class use to run on the thread found in the CWIWidget class
+class CWIWorker(QObject):
     progress = pyqtSignal(str)
     completion = pyqtSignal()
 
@@ -118,7 +114,7 @@ class CWIGlacialWorker(QObject):
         self.progress.emit('Loading Rasters...')
 
         try:
-            raster_list = glacial_unit_finder.get_raster_list(gdb_path)
+            raster_list = StratIdentifier.get_raster_list(gdb_path)
         except Exception as e:
             self.progress.emit(f'Error Loading Rasters! {e}')
             self.completion.emit()
@@ -127,7 +123,7 @@ class CWIGlacialWorker(QObject):
         self.progress.emit('Loading CWI Data...')
 
         try:
-            wells_df, layers_df = glacial_unit_finder.load_cwi_data(
+            wells_df, layers_df = StratIdentifier.load_cwi_data(
                 cwi_path,
                 st_path,
                 county
@@ -137,28 +133,37 @@ class CWIGlacialWorker(QObject):
             self.completion.emit()
             return
 
-        gu_df = pd.DataFrame()
+        unit_df = pd.DataFrame()
 
         for raster in raster_list:
             self.progress.emit(f'{raster_list.index(raster) + 1} OF {len(raster_list)} : UNIT {raster}')
 
-            raster_df = glacial_unit_finder.parse_raster(gdb_path, raster, wells_df, layers_df)
-
-            gu_df = pd.concat([gu_df, raster_df], ignore_index=True)
+            try:
+                raster_df = StratIdentifier.parse_raster(gdb_path, raster, wells_df, layers_df)
+                unit_df = pd.concat([unit_df, raster_df], ignore_index=True)
+            except Exception as e:
+                self.progress.emit(f'Error Parsing Raster! {e}')
+                self.completion.emit()
+                return
 
         self.progress.emit('Saving Data...')
 
         if save_type:
-            gu_df = glacial_unit_finder.find_majority_unit(gu_df)
+            try:
+                unit_df = StratIdentifier.find_majority_unit(unit_df)
+            except Exception as e:
+                self.progress.emit(f'Error Finding Majority Unit! {e}')
+                self.completion.emit()
+                return
 
         try:
             if save_mode == 'a':
-                gu_df.to_csv(save_path,
+                unit_df.to_csv(save_path,
                              mode=save_mode,
                              index=False,
                              header=None)
             else:
-                gu_df.to_csv(save_path,
+                unit_df.to_csv(save_path,
                              mode=save_mode,
                              index=False)
         except Exception as e:
@@ -169,7 +174,7 @@ class CWIGlacialWorker(QObject):
         self.progress.emit('Complete!')
         self.completion.emit()
 
-class CWIGlacialUnits(QWidget):
+class CWIWidget(QWidget):
 
     run_signal = pyqtSignal(str, str, str, str, str, bool, int)
 
@@ -187,7 +192,7 @@ class CWIGlacialUnits(QWidget):
     save_type = QComboBox
 
     thread : QThread
-    worker : CWIGlacialWorker
+    worker : CWIWorker
 
     def __init__(self):
         super().__init__()
@@ -267,7 +272,7 @@ class CWIGlacialUnits(QWidget):
         self.setLayout(layout)
 
         self.thread = QThread()
-        self.worker = CWIGlacialWorker()
+        self.worker = CWIWorker()
 
         self.worker.moveToThread(self.thread)
 

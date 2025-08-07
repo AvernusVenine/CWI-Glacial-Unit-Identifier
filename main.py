@@ -1,14 +1,10 @@
 import sys
-from PyQt5.QtWidgets import QApplication, QHBoxLayout, QWidget, QListWidget, QListWidgetItem, QComboBox, QFormLayout, \
-    QLineEdit, QPushButton, QLabel, QFileDialog
-
-import glacial_unit_finder
-from cwi_glacial_units import CWIGlacialUnits
-
+from PyQt5.QtWidgets import QApplication
+from cwi_app_widget import CWIWidget
 
 app = QApplication([])
 
-window = CWIGlacialUnits()
+window = CWIWidget()
 window.show()
 
 sys.exit(app.exec())
