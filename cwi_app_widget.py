@@ -174,6 +174,7 @@ class CWIWorker(QObject):
         self.progress.emit('Complete!')
         self.completion.emit()
 
+# Main App and GUI class for CWI Strat Identifier
 class CWIWidget(QWidget):
 
     run_signal = pyqtSignal(str, str, str, str, str, bool, int)
@@ -282,7 +283,6 @@ class CWIWidget(QWidget):
 
         self.thread.start()
 
-
     def run_app(self):
         self.run_button.hide()
 
@@ -302,6 +302,7 @@ class CWIWidget(QWidget):
     def update_progress(self, msg : str):
         self.progress_label.setText(msg)
 
+    # Used to open a file dialogue option for ease of use
     def open_file_dialog(self, label : QLabel, name_filter : str = '',
                          mode : QFileDialog.FileMode = QFileDialog.FileMode.ExistingFile):
         dialog = QFileDialog()

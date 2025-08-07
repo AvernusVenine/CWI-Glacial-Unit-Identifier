@@ -34,7 +34,6 @@ def load_cwi_data(cwi_path : str, st_path : str, county : int) -> (pd.DataFrame,
 
     return wells_df, layers_df
 
-# TODO: Need to add/fix elevation and depth!
 # Parses a raster for each layer found in a given dataframe, returning a dataframe containing all intersections and their percentage
 def parse_raster(data_path, raster : str, wells_df : pd.DataFrame, layers_df : pd.DataFrame):
     pd.set_option('mode.chained_assignment', None)
@@ -115,7 +114,7 @@ def parse_raster(data_path, raster : str, wells_df : pd.DataFrame, layers_df : p
 
     return df
 
-
+# Finds the highest percentage unit in a layer and returns a DataFrame containing only those entries
 def find_majority_unit(df : pd.DataFrame):
     maj_df = pd.DataFrame(columns=['c5st_objectid', 'relateid', 'unit', 'percentage', 'depth_top', 'depth_bot', 'elevation',
                                'elevation_top', 'elevation_bot'])
