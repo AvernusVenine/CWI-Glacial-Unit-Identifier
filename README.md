@@ -1,10 +1,10 @@
 # <ins>Stratigraphy Unit Identifier
-A small application utilized by the Minnesota Geological Society [MGS](https://cse.umn.edu/mgs) that parses the County Well Index [CWI](https://www.health.state.mn.us/communities/environment/water/mwi/index.html) layers and identifies either every
+A small application utilized by the Minnesota Geological Survey [MGS](https://cse.umn.edu/mgs) that parses the County Well Index [CWI](https://www.health.state.mn.us/communities/environment/water/mwi/index.html) layers and identifies either every
 code within a layer or the majority code within a layer and saves it to a .csv file.
 
 ## <ins>How to Use
 1) Select desired GeoDataBase (GDB) file under GDB Path
-2) Select most up to date CWI .csv file under CWI5 Path
+2) Select most up to date Main CWI .csv file under CWI5 Path
 3) Select most up to date CWI Strat Layers .csv file under C5ST Path
 4) Select county from which the above GDB is based off of
 5) Select a desired save location
