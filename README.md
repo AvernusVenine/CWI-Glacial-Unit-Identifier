@@ -8,7 +8,7 @@ In order to run this application, both an active ArcGIS Pro license and installe
 2) Under the ArcGIS directory, locate the arcgispro-py3 directory and copy its path (typically C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3)
 3) Using [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/main), clone the environment above using the following command
    - conda create --clone {arcgispro-py3 path}  --name {new environment name}
-4) Activate the environemnt using
+4) Activate the environment using
    - conda activate {environment name}
 5) Finally, run the following command to install arcpy
    - conda install arcpy=3.5 -c esri
