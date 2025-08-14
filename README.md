@@ -5,12 +5,13 @@ code within a layer or the majority code within a layer and saves it to a .csv f
 ## <ins>Creating the necessary Python environment
 In order to run this application, both an active ArcGIS Pro license and installed ArcGIS Pro application is required.  A full tutorial can be found [here](https://pro.arcgis.com/en/pro-app/latest/arcpy/get-started/installing-arcpy.htm).
 1) Find the ArcGIS directory (usually found under C:\Program Files)
-2) Under the ArcGIS directory, locate the arcgispro-py3 directory and copy its path (typically C:\Program Files\ArcGIS\Pro\bin\Python\envs\arcgispro-py3)
-3) Using [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/main), clone the environment above using the following command
-   - conda create --clone {arcgispro-py3 path}  --name {new environment name}
-4) Activate the environment using
-   - conda activate {environment name}
-5) Finally, run the following command to install arcpy
+2) Under the ArcGIS directory, locate conda.bat and set arcgispro-py3 as your environment (typically C:\Program Files\ArcGIS\Pro\bin\Python\conda\conda.bat)
+   - conda activate arcgispro-py3
+4) Using [Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/main), clone the environment above using the following command
+   - conda create --clone arcgispro-py3  --name {new environment name}
+5) Activate the environment using
+   - conda activate {new environment name}
+6) Finally, run the following command to install arcpy and be sure to install all other dependencies found in requirements.txt
    - conda install arcpy=3.5 -c esri
 
 ## <ins>How to Use
